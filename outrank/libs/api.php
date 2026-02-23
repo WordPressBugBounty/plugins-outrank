@@ -277,6 +277,71 @@ function outrank_receive_article($request) {
         update_post_meta($post_id, '_seopress_titles_title', $title);
     }
 
+    // Squirrly SEO - update wp_qss table if it exists
+    $sq_table = $wpdb->prefix . 'qss';
+    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+    if ($wpdb->get_var("SHOW TABLES LIKE '{$sq_table}'") === $sq_table) {
+        $post_url = get_permalink($post_id);
+        $url_hash = md5(strval($post_id));
+        $sq_meta_description = sanitize_text_field($params['meta_description'] ?? '');
+        $sq_focus_keyword = sanitize_text_field($params['focus_keyword'] ?? $params['focus_keyphrase'] ?? '');
+
+        $sq_defaults = array(
+            'doseo' => 1, 'noindex' => 0, 'nofollow' => 0, 'nositemap' => 0,
+            'title' => '', 'description' => '', 'keywords' => '',
+            'canonical' => '', 'primary_category' => '',
+            'redirect' => '', 'redirect_type' => 301,
+            'robots' => null, 'focuspage' => null,
+            'tw_media' => '', 'tw_title' => '', 'tw_description' => '', 'tw_type' => '',
+            'og_title' => '', 'og_description' => '', 'og_author' => '', 'og_type' => '', 'og_media' => '',
+            'jsonld' => '', 'jsonld_types' => array(), 'fpixel' => '',
+            'patterns' => null, 'sep' => null, 'optimizations' => null, 'innerlinks' => null,
+        );
+
+        // Check if entry already exists and preserve user-configured fields
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+        $existing = $wpdb->get_row($wpdb->prepare(
+            "SELECT id, seo FROM {$sq_table} WHERE url_hash = %s",
+            $url_hash
+        ));
+
+        if ($existing) {
+            $seo_data = maybe_unserialize($existing->seo);
+            if (!is_array($seo_data)) {
+                $seo_data = $sq_defaults;
+            }
+        } else {
+            $seo_data = $sq_defaults;
+        }
+
+        // Set our values (title, description, keywords)
+        $seo_data['title'] = $title ?? '';
+        $seo_data['description'] = $sq_meta_description;
+        $seo_data['keywords'] = $sq_focus_keyword;
+        $seo_data['doseo'] = 1;
+
+        if ($existing) {
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+            $wpdb->update($sq_table, array(
+                'seo'       => serialize($seo_data),
+                'date_time' => current_time('mysql'),
+            ), array('id' => $existing->id));
+        } else {
+            $post_obj = serialize(array(
+                'ID' => $post_id, 'post_type' => 'post', 'term_id' => 0, 'taxonomy' => '',
+            ));
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+            $wpdb->insert($sq_table, array(
+                'blog_id'   => get_current_blog_id(),
+                'post'      => $post_obj,
+                'URL'       => $post_url,
+                'url_hash'  => $url_hash,
+                'seo'       => serialize($seo_data),
+                'date_time' => current_time('mysql'),
+            ));
+        }
+    }
+
     return new WP_REST_Response(['success' => true, 'post_id' => $post_id], 200);
 }
 
