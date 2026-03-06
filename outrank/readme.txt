@@ -2,9 +2,9 @@
 Contributors: eugenezolo  
 Tags: seo, content automation, article sync, ai blog  
 Requires at least: 6.4  
-Tested up to: 6.8  
+Tested up to: 6.9
 Requires PHP: 8.0  
-Stable tag: 1.0.6
+Stable tag: 1.0.7
 License: GPLv2 or later  
 License URI: https://www.gnu.org/licenses/gpl-2.0.html  
 
@@ -69,6 +69,18 @@ Yes. You can choose whether articles are saved as drafts or published instantly.
 Outrank syncs articles to your site via a secure API connection.
 
 == Changelog ==
+
+= 1.0.7 =
+* External images in articles are now downloaded to the WordPress media library for better performance and SEO
+* New /set-integration-id REST endpoint for API-driven integration registration
+* Removed background cron fetch in favor of direct API-driven article submission
+* Plugin dashboard stays in sync when posts are trashed, deleted, or status-changed in WordPress
+* All secret comparisons now use timing-safe hash_equals() for security hardening
+* Fixed slug deduplication off-by-one error
+* Featured image now inherits author and parent post from the article
+* YouTube iframe embeds preserved through all post operations
+* Non-destructive uninstall: plugin no longer deletes user posts or media on removal
+* Added deactivation hook to clear scheduled cron event
 
 = 1.0.6 =
 * Added Squirrly SEO plugin support for SEO meta data (title, description, keywords)

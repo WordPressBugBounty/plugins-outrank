@@ -1,44 +1,8 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) exit; // Exit if accessed directly
 
-define('OUTRANK_API_SECRET', '7d775a0fd0bc1d92e4d3db1fe313d72e');
-require_once plugin_dir_path(__FILE__) . '../includes/image-functions.php';
-
-function sanitize_content($content) {
-    $allowed_html = wp_kses_allowed_html('post');
-
-    $allowed_html['iframe'] = array(
-        'src' => array(),
-        'width' => array(),
-        'height' => array(),
-        'frameborder' => array(),
-        'allowfullscreen' => array(),
-        'allow' => array(),
-        'style' => array(),
-    );
-
-    $sanitized = wp_kses($content, $allowed_html);
-
-    $sanitized = preg_replace_callback(
-        '/<iframe[^>]*>/i',
-        function($matches) {
-            $iframe = $matches[0];
-
-            if (preg_match('/src=["\']([^"\']*)["\']/', $iframe, $src_matches)) {
-                $src = trim($src_matches[1]);
-
-                if (preg_match('/^https:\/\/(www\.)?youtube\.com\/embed\/[a-zA-Z0-9_-]{11}(\?[^"\'<>]*)?$/i', $src) ||
-                    preg_match('/^https:\/\/(www\.)?youtube-nocookie\.com\/embed\/[a-zA-Z0-9_-]{11}(\?[^"\'<>]*)?$/i', $src)) {
-                    return $iframe;
-                }
-            }
-
-            return '';
-        },
-        $sanitized
-    );
-
-    return $sanitized;
+if (!defined('OUTRANK_API_SECRET')) {
+    define('OUTRANK_API_SECRET', '7d775a0fd0bc1d92e4d3db1fe313d72e');
 }
 
 add_action('rest_api_init', function () {
@@ -50,7 +14,7 @@ add_action('rest_api_init', function () {
             if (!$secretKey) {
                 $secretKey = $request->get_header('x-secret-key');
             }
-            return $secretKey && hash_equals($secretKey, OUTRANK_API_SECRET);
+            return $secretKey && hash_equals(OUTRANK_API_SECRET, $secretKey);
         }
     ]);
     
@@ -79,7 +43,33 @@ add_action('rest_api_init', function () {
             ]
         ]
     ]);
+
+    register_rest_route('outrank/v1', '/set-integration-id', [
+        'methods' => 'POST',
+        'callback' => 'outrank_set_integration_id',
+        'permission_callback' => '__return_true'
+    ]);
 });
+
+function outrank_set_integration_id($request) {
+    $params = $request->get_json_params();
+
+    $secret = sanitize_text_field($params['secret'] ?? '');
+    $storedSecret = get_option('outrank_api_key');
+
+    if (!$secret || !$storedSecret || !hash_equals($storedSecret, $secret)) {
+        return new WP_REST_Response(['error' => 'Invalid or missing secret'], 403);
+    }
+
+    $integration_id = sanitize_text_field($params['integration_id'] ?? '');
+    if (empty($integration_id)) {
+        return new WP_REST_Response(['error' => 'Missing integration_id'], 400);
+    }
+
+    update_option('outrank_integration_id', $integration_id);
+
+    return new WP_REST_Response(['success' => true], 200);
+}
 
 function outrank_receive_article($request) {
     global $wpdb;
@@ -92,7 +82,7 @@ function outrank_receive_article($request) {
     $secret = sanitize_text_field($params['secret'] ?? '');
     $storedSecret = get_option('outrank_api_key');
 
-    if (!$secret || $secret !== $storedSecret) {
+    if (!$secret || !$storedSecret || !hash_equals($storedSecret, $secret)) {
         return new WP_REST_Response(['error' => 'Invalid or missing secret'], 403);
     }
 
@@ -117,69 +107,18 @@ function outrank_receive_article($request) {
         }
     }
 
-    // Handle categories
-    $category = $params['category'] ?? '';
-    $category_ids = [];
+    $category_ids = outrank_resolve_category_ids($params['category'] ?? '');
 
-    if (!empty($category)) {
-        $categories = is_array($category) ? $category : [$category];
-        foreach ($categories as $cat_name) {
-            $cat_name = sanitize_text_field($cat_name);
-            $cat = get_category_by_slug(sanitize_title($cat_name));
-            if (!$cat) {
-                // Use wp_insert_term instead of wp_create_category (works in REST API context)
-                $term = wp_insert_term($cat_name, 'category');
-                if (!is_wp_error($term)) {
-                    $category_ids[] = $term['term_id'];
-                } else {
-                    // Fallback to Uncategorized if category creation fails
-                    $category_ids[] = 1;
-                }
-            } else {
-                $category_ids[] = $cat->term_id;
-            }
-        }
-    } else {
-        // Use WordPress default "Uncategorized" category (ID: 1)
-        $category_ids[] = 1;
-    }
-
-    // Check if slug exists in custom table and generate unique one if needed
-    $unique_slug = $slug;
-    $suffix = 2;
-    $max_attempts = 10;
-
-    while ($suffix <= $max_attempts) {
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
-        $existing_in_custom = $wpdb->get_var(
-            $wpdb->prepare("SELECT COUNT(*) FROM {$table_name} WHERE slug = %s", $unique_slug)
-        );
-
-        // Check if slug exists in WordPress posts
-        $existing_in_wp = get_page_by_path($unique_slug, OBJECT, 'post');
-
-        if ($existing_in_custom == 0 && !$existing_in_wp) {
-            break; // Slug is unique in both tables
-        }
-
-        // Slug exists, try next suffix
-        $unique_slug = $slug . '-' . $suffix;
-        $suffix++;
-    }
-
-    // If we couldn't find a unique slug after max attempts, return error
-    if ($suffix > $max_attempts) {
+    $unique_slug = outrank_generate_unique_slug($slug, $table_name);
+    if (!$unique_slug) {
         return new WP_REST_Response([
             'error' => 'Too many posts with the same slug. Please use a different slug.'
         ], 409);
     }
 
-    remove_filter('content_save_pre', 'wp_filter_post_kses');
+    $sanitized_content = outrank_sanitize_content($params['content'] ?? '');
 
-    $sanitized_content = sanitize_content($params['content'] ?? '');
-
-    // Insert post with the unique slug
-    $post_id = wp_insert_post([
+    $post_id = outrank_create_post_with_images([
         'post_title'    => $title,
         'post_content'  => $sanitized_content,
         'post_status'   => get_option('outrank_post_as_draft', 'yes') === 'yes' ? 'draft' : 'publish',
@@ -190,18 +129,19 @@ function outrank_receive_article($request) {
         'post_author'   => $author_id,
     ]);
 
-    add_filter('content_save_pre', 'wp_filter_post_kses');
-
     if (is_wp_error($post_id)) {
+        // Clean up the uploaded image to avoid orphaned attachments
+        if (!empty($imageId)) {
+            wp_delete_attachment($imageId, true);
+        }
         return new WP_REST_Response(['error' => 'Failed to create post: ' . $post_id->get_error_message()], 500);
     }
 
-    // Get the final slug and status
     $final_slug = get_post_field('post_name', $post_id);
     $post_status = get_post_field('post_status', $post_id);
 
     // Insert into custom table with the actual WordPress slug
-    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
     $inserted = $wpdb->insert($table_name, [
         'image'            => $imageId ? (string) $imageId : '',
         'slug'             => $final_slug,
@@ -212,135 +152,31 @@ function outrank_receive_article($request) {
     ]);
 
     if (!$inserted) {
-        // If custom table insert fails, delete the post to maintain consistency
+        // If custom table insert fails, delete the post and image to maintain consistency
         $db_error = $wpdb->last_error;
         wp_delete_post($post_id, true);
+        if (!empty($imageId)) {
+            wp_delete_attachment($imageId, true);
+        }
         return new WP_REST_Response([
             'error' => 'Failed to insert into tracking table' . ( $db_error ? ': ' . $db_error : '' )
         ], 500);
     }
 
-    // Set featured image
+    // Set featured image and update its author/parent to match the post
     if (!empty($imageId)) {
         set_post_thumbnail($post_id, $imageId);
-    }
-
-    // Set SEO meta data for popular SEO plugins
-    if (!empty($params['meta_description'])) {
-        $meta_description = sanitize_text_field($params['meta_description']);
-        
-        // Yoast SEO
-        update_post_meta($post_id, '_yoast_wpseo_metadesc', $meta_description);
-        
-        // Rank Math
-        update_post_meta($post_id, 'rank_math_description', $meta_description);
-        
-        // All in One SEO
-        update_post_meta($post_id, '_aioseo_description', $meta_description);
-        
-        // SEOPress
-        update_post_meta($post_id, '_seopress_titles_desc', $meta_description);
-    }
-    
-    // Set focus keyphrase/keyword if provided
-    if (!empty($params['focus_keyword']) || !empty($params['focus_keyphrase'])) {
-        $focus_keyword = sanitize_text_field($params['focus_keyword'] ?? $params['focus_keyphrase'] ?? '');
-        
-        // Yoast SEO
-        update_post_meta($post_id, '_yoast_wpseo_focuskw', $focus_keyword);
-        
-        // Rank Math
-        update_post_meta($post_id, 'rank_math_focus_keyword', $focus_keyword);
-        
-        // All in One SEO (stores as JSON)
-        $aioseo_keyphrases = json_encode([
-            ['keyphrase' => $focus_keyword, 'score' => 0]
+        wp_update_post([
+            'ID'          => $imageId,
+            'post_author' => $author_id,
+            'post_parent' => $post_id,
         ]);
-        update_post_meta($post_id, '_aioseo_keyphrases', $aioseo_keyphrases);
-        
-        // SEOPress
-        update_post_meta($post_id, '_seopress_analysis_target_kw', $focus_keyword);
-    }
-    
-    // Set SEO title using the normal title
-    if (!empty($title)) {
-        // Yoast SEO
-        update_post_meta($post_id, '_yoast_wpseo_title', $title);
-        
-        // Rank Math
-        update_post_meta($post_id, 'rank_math_title', $title);
-        
-        // All in One SEO
-        update_post_meta($post_id, '_aioseo_title', $title);
-        
-        // SEOPress
-        update_post_meta($post_id, '_seopress_titles_title', $title);
     }
 
-    // Squirrly SEO - update wp_qss table if it exists
-    $sq_table = $wpdb->prefix . 'qss';
-    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
-    if ($wpdb->get_var("SHOW TABLES LIKE '{$sq_table}'") === $sq_table) {
-        $post_url = get_permalink($post_id);
-        $url_hash = md5(strval($post_id));
-        $sq_meta_description = sanitize_text_field($params['meta_description'] ?? '');
-        $sq_focus_keyword = sanitize_text_field($params['focus_keyword'] ?? $params['focus_keyphrase'] ?? '');
-
-        $sq_defaults = array(
-            'doseo' => 1, 'noindex' => 0, 'nofollow' => 0, 'nositemap' => 0,
-            'title' => '', 'description' => '', 'keywords' => '',
-            'canonical' => '', 'primary_category' => '',
-            'redirect' => '', 'redirect_type' => 301,
-            'robots' => null, 'focuspage' => null,
-            'tw_media' => '', 'tw_title' => '', 'tw_description' => '', 'tw_type' => '',
-            'og_title' => '', 'og_description' => '', 'og_author' => '', 'og_type' => '', 'og_media' => '',
-            'jsonld' => '', 'jsonld_types' => array(), 'fpixel' => '',
-            'patterns' => null, 'sep' => null, 'optimizations' => null, 'innerlinks' => null,
-        );
-
-        // Check if entry already exists and preserve user-configured fields
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
-        $existing = $wpdb->get_row($wpdb->prepare(
-            "SELECT id, seo FROM {$sq_table} WHERE url_hash = %s",
-            $url_hash
-        ));
-
-        if ($existing) {
-            $seo_data = maybe_unserialize($existing->seo);
-            if (!is_array($seo_data)) {
-                $seo_data = $sq_defaults;
-            }
-        } else {
-            $seo_data = $sq_defaults;
-        }
-
-        // Set our values (title, description, keywords)
-        $seo_data['title'] = $title ?? '';
-        $seo_data['description'] = $sq_meta_description;
-        $seo_data['keywords'] = $sq_focus_keyword;
-        $seo_data['doseo'] = 1;
-
-        if ($existing) {
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
-            $wpdb->update($sq_table, array(
-                'seo'       => serialize($seo_data),
-                'date_time' => current_time('mysql'),
-            ), array('id' => $existing->id));
-        } else {
-            $post_obj = serialize(array(
-                'ID' => $post_id, 'post_type' => 'post', 'term_id' => 0, 'taxonomy' => '',
-            ));
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
-            $wpdb->insert($sq_table, array(
-                'blog_id'   => get_current_blog_id(),
-                'post'      => $post_obj,
-                'URL'       => $post_url,
-                'url_hash'  => $url_hash,
-                'seo'       => serialize($seo_data),
-                'date_time' => current_time('mysql'),
-            ));
-        }
-    }
+    $focus_keyword = sanitize_text_field($params['focus_keyword'] ?? $params['focus_keyphrase'] ?? '');
+    $meta_desc = sanitize_text_field($params['meta_description'] ?? '');
+    outrank_set_seo_meta($post_id, $title, $meta_desc, $focus_keyword);
+    outrank_set_squirrly_seo($post_id, $title, $meta_desc, $focus_keyword);
 
     return new WP_REST_Response(['success' => true, 'post_id' => $post_id], 200);
 }
@@ -368,13 +204,13 @@ function outrank_test_integration($request) {
         ], 403);
     }
     
-    if ($secret !== $storedSecret) {
+    if (!hash_equals($storedSecret, $secret)) {
         return new WP_REST_Response([
-            'success' => false, 
+            'success' => false,
             'error_code' => 'invalid_integration_key'
         ], 403);
     }
-    
+
     // 4. Create test post with dummy data
     $test_post_id = wp_insert_post([
         'post_title'    => 'Test Post - Outrank Integration',
@@ -418,7 +254,7 @@ function outrank_get_posts($request) {
     
     // 2. Verify integration key
     $storedSecret = get_option('outrank_api_key');
-    if (!$secret || !$storedSecret || $secret !== $storedSecret) {
+    if (!$secret || !$storedSecret || !hash_equals($storedSecret, $secret)) {
         return new WP_REST_Response([
             'success' => false,
             'error_code' => 'invalid_integration_key'
@@ -482,4 +318,194 @@ function outrank_get_posts($request) {
             'total_pages' => (int) $query->max_num_pages
         ]
     ], 200);
+}
+
+// --- Helper functions for article submission ---
+
+function outrank_sanitize_content($content) {
+    $allowed_html = wp_kses_allowed_html('post');
+
+    $allowed_html['iframe'] = array(
+        'src' => array(),
+        'width' => array(),
+        'height' => array(),
+        'frameborder' => array(),
+        'allowfullscreen' => array(),
+        'allow' => array(),
+        'style' => array(),
+    );
+
+    $sanitized = wp_kses($content, $allowed_html);
+
+    $sanitized = preg_replace_callback(
+        '/<iframe[^>]*>/i',
+        function($matches) {
+            $iframe = $matches[0];
+
+            if (preg_match('/src=["\']([^"\']*)["\']/', $iframe, $src_matches)) {
+                $src = trim($src_matches[1]);
+
+                if (preg_match('/^https:\/\/(www\.)?youtube\.com\/embed\/[a-zA-Z0-9_-]{11}(\?[^"\'<>]*)?$/i', $src) ||
+                    preg_match('/^https:\/\/(www\.)?youtube-nocookie\.com\/embed\/[a-zA-Z0-9_-]{11}(\?[^"\'<>]*)?$/i', $src)) {
+                    return $iframe;
+                }
+            }
+
+            return '';
+        },
+        $sanitized
+    );
+
+    return $sanitized;
+}
+
+function outrank_resolve_category_ids($category) {
+    $category_ids = [];
+    if (!empty($category)) {
+        $categories = is_array($category) ? $category : [$category];
+        foreach ($categories as $cat_name) {
+            $cat_name = sanitize_text_field($cat_name);
+            $cat = get_category_by_slug(sanitize_title($cat_name));
+            if (!$cat) {
+                $term = wp_insert_term($cat_name, 'category');
+                if (!is_wp_error($term)) {
+                    $category_ids[] = $term['term_id'];
+                } else {
+                    $category_ids[] = 1;
+                }
+            } else {
+                $category_ids[] = $cat->term_id;
+            }
+        }
+    } else {
+        $category_ids[] = 1;
+    }
+    return $category_ids;
+}
+
+function outrank_generate_unique_slug($slug, $table_name) {
+    global $wpdb;
+    $max_attempts = 10;
+    for ($i = 0; $i < $max_attempts; $i++) {
+        $test_slug = ($i === 0) ? $slug : $slug . '-' . ($i + 1);
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+        $in_custom = $wpdb->get_var(
+            $wpdb->prepare("SELECT COUNT(*) FROM %i WHERE slug = %s", $table_name, $test_slug)
+        );
+        $in_wp = get_page_by_path($test_slug, OBJECT, 'post');
+        if ($in_custom == 0 && !$in_wp) {
+            return $test_slug;
+        }
+    }
+    return false;
+}
+
+function outrank_set_seo_meta($post_id, $title, $meta_description = '', $focus_keyword = '') {
+    if (!empty($meta_description)) {
+        update_post_meta($post_id, '_yoast_wpseo_metadesc', $meta_description);
+        update_post_meta($post_id, 'rank_math_description', $meta_description);
+        update_post_meta($post_id, '_aioseo_description', $meta_description);
+        update_post_meta($post_id, '_seopress_titles_desc', $meta_description);
+    }
+    if (!empty($focus_keyword)) {
+        update_post_meta($post_id, '_yoast_wpseo_focuskw', $focus_keyword);
+        update_post_meta($post_id, 'rank_math_focus_keyword', $focus_keyword);
+        update_post_meta($post_id, '_aioseo_keyphrases', json_encode([
+            ['keyphrase' => $focus_keyword, 'score' => 0]
+        ]));
+        update_post_meta($post_id, '_seopress_analysis_target_kw', $focus_keyword);
+    }
+    if (!empty($title)) {
+        update_post_meta($post_id, '_yoast_wpseo_title', $title);
+        update_post_meta($post_id, 'rank_math_title', $title);
+        update_post_meta($post_id, '_aioseo_title', $title);
+        update_post_meta($post_id, '_seopress_titles_title', $title);
+    }
+}
+
+function outrank_set_squirrly_seo($post_id, $title, $meta_description = '', $focus_keyword = '') {
+    global $wpdb;
+    $sq_table = $wpdb->prefix . 'qss';
+    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+    if ($wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $sq_table)) !== $sq_table) return;
+
+    $url_hash = md5(strval($post_id));
+
+    $sq_defaults = array(
+        'doseo' => 1, 'noindex' => 0, 'nofollow' => 0, 'nositemap' => 0,
+        'title' => '', 'description' => '', 'keywords' => '',
+        'canonical' => '', 'primary_category' => '',
+        'redirect' => '', 'redirect_type' => 301,
+        'robots' => null, 'focuspage' => null,
+        'tw_media' => '', 'tw_title' => '', 'tw_description' => '', 'tw_type' => '',
+        'og_title' => '', 'og_description' => '', 'og_author' => '', 'og_type' => '', 'og_media' => '',
+        'jsonld' => '', 'jsonld_types' => array(), 'fpixel' => '',
+        'patterns' => null, 'sep' => null, 'optimizations' => null, 'innerlinks' => null,
+    );
+
+    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+    $existing = $wpdb->get_row($wpdb->prepare(
+        "SELECT id, seo FROM %i WHERE url_hash = %s",
+        $sq_table,
+        $url_hash
+    ));
+
+    if ($existing) {
+        $seo_data = maybe_unserialize($existing->seo);
+        if (!is_array($seo_data)) {
+            $seo_data = $sq_defaults;
+        }
+    } else {
+        $seo_data = $sq_defaults;
+    }
+
+    $seo_data['title'] = $title ?? '';
+    $seo_data['description'] = $meta_description;
+    $seo_data['keywords'] = $focus_keyword;
+    $seo_data['doseo'] = 1;
+
+    if ($existing) {
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+        $wpdb->update($sq_table, array(
+            'seo'       => serialize($seo_data),
+            'date_time' => current_time('mysql'),
+        ), array('id' => $existing->id));
+    } else {
+        $post_url = get_permalink($post_id);
+        $post_obj = serialize(array(
+            'ID' => $post_id, 'post_type' => 'post', 'term_id' => 0, 'taxonomy' => '',
+        ));
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+        $wpdb->insert($sq_table, array(
+            'blog_id'   => get_current_blog_id(),
+            'post'      => $post_obj,
+            'URL'       => $post_url,
+            'url_hash'  => $url_hash,
+            'seo'       => serialize($seo_data),
+            'date_time' => current_time('mysql'),
+        ));
+    }
+}
+
+function outrank_create_post_with_images($args) {
+    // Remove ALL kses filters (handles both admin and cron contexts)
+    kses_remove_filters();
+
+    $post_id = wp_insert_post($args);
+
+    if (is_wp_error($post_id)) {
+        kses_init_filters();
+        return $post_id;
+    }
+
+    $updated_content = outrank_download_content_images($args['post_content'], $post_id);
+    if ($updated_content !== $args['post_content']) {
+        wp_update_post([
+            'ID'           => $post_id,
+            'post_content' => $updated_content,
+        ]);
+    }
+
+    kses_init_filters();
+    return $post_id;
 }

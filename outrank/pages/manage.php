@@ -7,15 +7,15 @@ if (isset($_POST['btn_save_and_sync'])) {
     check_admin_referer('outrank_save_key');
 
     // Securely handle input
-    $apiKey = isset($_POST['api_key']) ? sanitize_text_field(wp_unslash($_POST['api_key'])) : '';
-    $postMode = isset($_POST['post_as_draft']) ? sanitize_text_field(wp_unslash($_POST['post_as_draft'])) : 'no';
+    $outrank_api_key = isset($_POST['api_key']) ? sanitize_text_field(wp_unslash($_POST['api_key'])) : '';
+    $outrank_post_mode = isset($_POST['post_as_draft']) ? sanitize_text_field(wp_unslash($_POST['post_as_draft'])) : 'no';
 
-    if (!in_array($postMode, ['yes', 'no'])) {
-        $postMode = 'no'; // fallback
+    if (!in_array($outrank_post_mode, ['yes', 'no'])) {
+        $outrank_post_mode = 'no'; // fallback
     }
 
-    update_option('outrank_api_key', $apiKey);
-    update_option('outrank_post_as_draft', $postMode);
+    update_option('outrank_api_key', $outrank_api_key);
+    update_option('outrank_post_as_draft', $outrank_post_mode);
 
     echo '<div class="outrank-success-notice">
             <div class="notice-content">
@@ -31,14 +31,14 @@ if (isset($_POST['btn_save_and_sync'])) {
 }
 
 // Get saved values
-$apiKey = get_option('outrank_api_key');
-$isDraft = get_option('outrank_post_as_draft', 'no');
+$outrank_api_key = get_option('outrank_api_key');
+$outrank_is_draft = get_option('outrank_post_as_draft', 'no');
 ?>
 
 <div class="outrank-settings-container">
     <div class="outrank-settings-card">
         <div class="outrank-settings-header">
-            <h1 class="settings-title"><?php echo empty($apiKey) ? 'Outrank Plugin Set Up' : 'Plugin Settings'; ?></h1>
+            <h1 class="settings-title"><?php echo empty($outrank_api_key) ? 'Outrank Plugin Set Up' : 'Plugin Settings'; ?></h1>
             <p class="settings-subtitle">Configure Outrank plugin to publish articles to your website</p>
         </div>
 
@@ -53,7 +53,7 @@ $isDraft = get_option('outrank_post_as_draft', 'no');
                         id="api_key" 
                         name="api_key" 
                         class="field-input" 
-                        value="<?php echo esc_attr($apiKey); ?>" 
+                        value="<?php echo esc_attr($outrank_api_key); ?>" 
                         placeholder="Enter your integration key here..."
                         required 
                     />
@@ -66,8 +66,8 @@ $isDraft = get_option('outrank_post_as_draft', 'no');
                     <label for="post_as_draft" class="field-label">Post Mode</label>
                     <select name="post_as_draft" id="post_as_draft" class="field-input">
                         <option value="" disabled>Select Post Mode</option>
-                        <option value="yes" <?php selected($isDraft, 'yes'); ?>>Save as Draft</option>
-                        <option value="no" <?php selected($isDraft, 'no'); ?>>Publish Directly</option>
+                        <option value="yes" <?php selected($outrank_is_draft, 'yes'); ?>>Save as Draft</option>
+                        <option value="no" <?php selected($outrank_is_draft, 'no'); ?>>Publish Directly</option>
                     </select>
                     <p class="field-description">Choose whether incoming posts are published immediately or saved as drafts.</p>
                 </div>

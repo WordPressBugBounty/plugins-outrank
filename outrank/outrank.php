@@ -5,13 +5,13 @@ if ( ! defined( 'ABSPATH' ) ) exit; // Exit if accessed directly
  * Plugin Name: Outrank
  * Plugin URI: https://outrank.so
  * Description: Get traffic and outrank competitors with automatic SEO-optimized content generation published to your WordPress site.
- * Version: 1.0.6
+ * Version: 1.0.7
  * Author: Outrank
  * License: GPLv2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Requires PHP: 8.0
  * Requires at least: 6.4
- * Tested up to: 6.8
+ * Tested up to: 6.9
 */
 
 define('OUTRANK_PLUGIN_PATH', plugin_dir_path(__FILE__));
@@ -98,6 +98,7 @@ function outrank_add_outrank_menu() {
 add_action('admin_init', 'outrank_check_api_key_redirect');
 function outrank_check_api_key_redirect() {
     // Only redirect if we're on the Outrank home page
+    // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- admin page routing, no form data processed
     if (isset($_GET['page']) && $_GET['page'] === 'outrank') {
         $apiKey = get_option('outrank_api_key');
         if (empty($apiKey)) {
@@ -115,6 +116,7 @@ function outrank_activation_redirect() {
         delete_transient('outrank_activation_redirect');
 
         // Don't redirect on multi-site activations or bulk plugin activations
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- standard WP activation check
         if (is_network_admin() || isset($_GET['activate-multi'])) {
             return;
         }
@@ -239,11 +241,12 @@ function outrank_cleanup_site($blog_id) {
     switch_to_blog($blog_id);
 
     $table_name = $wpdb->prefix . 'outrank_manage';
-    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.SchemaChange
+    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.DirectDatabaseQuery.NoCaching
     $wpdb->query($wpdb->prepare("DROP TABLE IF EXISTS %i", $table_name));
 
     // Clean up options
     delete_option('outrank_api_key');
+    delete_option('outrank_integration_id');
     delete_option('outrank_post_as_draft');
 
     restore_current_blog();
@@ -254,10 +257,10 @@ add_action('admin_enqueue_scripts', 'outrank_add_plugin_assets');
 function outrank_add_plugin_assets($hook_suffix = '') {
     if (strpos($hook_suffix, 'outrank') === false) return; // Only enqueue on outrank pages
 
-    wp_enqueue_style('outrank-style', OUTRANK_PLUGIN_URL . 'css/manage.css', [], '1.0.6');
-    wp_enqueue_style('outrank-home-style', OUTRANK_PLUGIN_URL . 'css/home.css', [], '1.0.6');
+    wp_enqueue_style('outrank-style', OUTRANK_PLUGIN_URL . 'css/manage.css', [], '1.0.7');
+    wp_enqueue_style('outrank-home-style', OUTRANK_PLUGIN_URL . 'css/home.css', [], '1.0.7');
 
-    wp_enqueue_script('outrank-script', OUTRANK_PLUGIN_URL . 'script/manage.js', ['jquery'], '1.0.6', true);
+    wp_enqueue_script('outrank-script', OUTRANK_PLUGIN_URL . 'script/manage.js', ['jquery'], '1.0.7', true);
 }
 
 // Helper function to get all articles from DB
@@ -271,7 +274,7 @@ function outrank_get_articles() {
     $articles = wp_cache_get($cache_key, 'outrank');
 
     if ($articles === false) {
-        $table_name = esc_sql($wpdb->prefix . 'outrank_manage');
+        $table_name = $wpdb->prefix . 'outrank_manage';
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
         $articles = $wpdb->get_results($wpdb->prepare("SELECT * FROM %i ORDER BY created_at DESC", $table_name));
         wp_cache_set($cache_key, $articles, 'outrank', 300); // Cache for 5 minutes
@@ -280,17 +283,59 @@ function outrank_get_articles() {
     return $articles;
 }
 
+function outrank_clear_articles_cache() {
+    wp_cache_delete('outrank_all_articles_' . get_current_blog_id(), 'outrank');
+}
+
 require_once OUTRANK_PLUGIN_PATH . 'libs/api.php';
 
-$api_file = OUTRANK_PLUGIN_PATH . 'libs/api.php';
+// Sync post status changes to outrank_manage table
+add_action('transition_post_status', 'outrank_sync_post_status', 10, 3);
+function outrank_sync_post_status($new_status, $old_status, $post) {
+    if ($post->post_type !== 'post') return;
+    if ($new_status === $old_status) return;
 
-if (file_exists($api_file)) {
-    require_once $api_file;
-    // if (defined('WP_DEBUG') && WP_DEBUG === true) {
-    //     error_log("✅ api.php included from $api_file");
-    // }
-// } else {
-    // if (defined('WP_DEBUG') && WP_DEBUG === true) {
-    //     error_log("❌ api.php NOT found at $api_file");
-    // }
+    global $wpdb;
+    $table = $wpdb->prefix . 'outrank_manage';
+
+    if (!outrank_table_exists()) return;
+
+    $slug = $post->post_name;
+    // Strip __trashed suffix WordPress adds when trashing
+    $slug = preg_replace('/__trashed$/', '', $slug);
+
+    // Check if another post uses this slug (avoid conflicts)
+    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+    $other_post = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_name = %s AND post_type = 'post' AND ID != %d",
+        $slug,
+        $post->ID
+    ));
+    if ($other_post > 0) return;
+
+    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+    $wpdb->update($table, ['status' => $new_status], ['slug' => $slug]);
+
+    outrank_clear_articles_cache();
 }
+
+// Remove from outrank_manage when a post is permanently deleted
+add_action('before_delete_post', 'outrank_sync_post_delete', 10, 1);
+function outrank_sync_post_delete($post_id) {
+    $post = get_post($post_id);
+    if (!$post || $post->post_type !== 'post') return;
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'outrank_manage';
+
+    if (!outrank_table_exists()) return;
+
+    $slug = $post->post_name;
+    $slug = preg_replace('/__trashed$/', '', $slug);
+
+    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+    $wpdb->delete($table, ['slug' => $slug]);
+
+    outrank_clear_articles_cache();
+}
+

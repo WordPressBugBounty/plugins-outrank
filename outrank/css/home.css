@@ -280,6 +280,12 @@
   border: 1px solid #93c5fd;
 }
 
+.status-trash {
+  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
 .post-date {
   color: #6b7280;
   font-size: 0.85rem;

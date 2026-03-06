@@ -1,5 +1,7 @@
 <?php
+if ( ! defined( 'ABSPATH' ) ) exit; // Exit if accessed directly
 
+if (!function_exists('outrank_render_image')) :
 function outrank_render_image($attachment_id, $alt = 'Post thumbnail') {
     if (!$attachment_id || !is_numeric($attachment_id)) {
         return '<div class="no-image">No image</div>';
@@ -10,20 +12,22 @@ function outrank_render_image($attachment_id, $alt = 'Post thumbnail') {
         'class' => 'custom-thumbnail',
     ]);
 }
+endif;
 
-if ( ! defined( 'ABSPATH' ) ) exit; // Exit if accessed directly
+// Articles are fetched only when the user clicks Save on the settings page
 
-$articles = outrank_get_articles();
+$outrank_articles = outrank_get_articles();
 
-$per_page = 10;
-$total = count($articles);
-$total_pages = (int) ceil($total / $per_page);
-$paged = isset($_GET['paged']) ? max(1, (int) $_GET['paged']) : 1;
-if ($paged > $total_pages && $total_pages > 0) {
-    $paged = $total_pages;
+$outrank_per_page = 10;
+$outrank_total = count($outrank_articles);
+$outrank_total_pages = (int) ceil($outrank_total / $outrank_per_page);
+// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only pagination on admin page
+$outrank_paged = isset($_GET['paged']) ? max(1, (int) $_GET['paged']) : 1;
+if ($outrank_paged > $outrank_total_pages && $outrank_total_pages > 0) {
+    $outrank_paged = $outrank_total_pages;
 }
-$offset = ($paged - 1) * $per_page;
-$paged_articles = array_slice($articles, $offset, $per_page);
+$outrank_offset = ($outrank_paged - 1) * $outrank_per_page;
+$outrank_paged_articles = array_slice($outrank_articles, $outrank_offset, $outrank_per_page);
 ?>
 
 <div class="outrank-container">
@@ -43,7 +47,7 @@ $paged_articles = array_slice($articles, $offset, $per_page);
         </div>
 
         <div class="outrank-table-container">
-            <?php if (!empty($articles)) : ?>
+            <?php if (!empty($outrank_articles)) : ?>
                 <table class="outrank-table">
                     <thead>
                         <tr>
@@ -56,7 +60,7 @@ $paged_articles = array_slice($articles, $offset, $per_page);
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($paged_articles as $post) : ?>
+                        <?php foreach ($outrank_paged_articles as $post) : ?>
                             <tr>
                                 <td>
                                     <div class="post-title">
@@ -96,33 +100,33 @@ $paged_articles = array_slice($articles, $offset, $per_page);
                         <?php endforeach; ?>
                     </tbody>
                 </table>
-                <?php if ($total_pages > 1) : ?>
+                <?php if ($outrank_total_pages > 1) : ?>
                     <div class="outrank-pagination">
                         <span class="pagination-info">
-                            Showing <?php echo esc_html($offset + 1); ?>–<?php echo esc_html(min($offset + $per_page, $total)); ?> of <?php echo esc_html($total); ?> articles
+                            Showing <?php echo esc_html($outrank_offset + 1); ?>–<?php echo esc_html(min($outrank_offset + $outrank_per_page, $outrank_total)); ?> of <?php echo esc_html($outrank_total); ?> articles
                         </span>
                         <div class="pagination-links">
-                            <?php if ($paged > 1) : ?>
-                                <a href="<?php echo esc_url(admin_url('admin.php?page=outrank&paged=' . ($paged - 1))); ?>" class="pagination-btn pagination-prev">&lsaquo; Previous</a>
+                            <?php if ($outrank_paged > 1) : ?>
+                                <a href="<?php echo esc_url(admin_url('admin.php?page=outrank&paged=' . ($outrank_paged - 1))); ?>" class="pagination-btn pagination-prev">&lsaquo; Previous</a>
                             <?php else : ?>
                                 <span class="pagination-btn pagination-prev pagination-disabled">&lsaquo; Previous</span>
                             <?php endif; ?>
                             <?php
-                            $range = 2;
-                            for ($i = 1; $i <= $total_pages; $i++) :
-                                if ($i === 1 || $i === $total_pages || ($i >= $paged - $range && $i <= $paged + $range)) :
-                                    if ($i === $paged) : ?>
-                                        <span class="pagination-btn pagination-current"><?php echo esc_html($i); ?></span>
+                            $outrank_range = 2;
+                            for ($outrank_i = 1; $outrank_i <= $outrank_total_pages; $outrank_i++) :
+                                if ($outrank_i === 1 || $outrank_i === $outrank_total_pages || ($outrank_i >= $outrank_paged - $outrank_range && $outrank_i <= $outrank_paged + $outrank_range)) :
+                                    if ($outrank_i === $outrank_paged) : ?>
+                                        <span class="pagination-btn pagination-current"><?php echo esc_html($outrank_i); ?></span>
                                     <?php else : ?>
-                                        <a href="<?php echo esc_url(admin_url('admin.php?page=outrank&paged=' . $i)); ?>" class="pagination-btn"><?php echo esc_html($i); ?></a>
+                                        <a href="<?php echo esc_url(admin_url('admin.php?page=outrank&paged=' . $outrank_i)); ?>" class="pagination-btn"><?php echo esc_html($outrank_i); ?></a>
                                     <?php endif;
-                                elseif ($i === 2 || $i === $total_pages - 1) : ?>
+                                elseif ($outrank_i === 2 || $outrank_i === $outrank_total_pages - 1) : ?>
                                     <span class="pagination-ellipsis">&hellip;</span>
                                 <?php endif;
                             endfor;
                             ?>
-                            <?php if ($paged < $total_pages) : ?>
-                                <a href="<?php echo esc_url(admin_url('admin.php?page=outrank&paged=' . ($paged + 1))); ?>" class="pagination-btn pagination-next">Next &rsaquo;</a>
+                            <?php if ($outrank_paged < $outrank_total_pages) : ?>
+                                <a href="<?php echo esc_url(admin_url('admin.php?page=outrank&paged=' . ($outrank_paged + 1))); ?>" class="pagination-btn pagination-next">Next &rsaquo;</a>
                             <?php else : ?>
                                 <span class="pagination-btn pagination-next pagination-disabled">Next &rsaquo;</span>
                             <?php endif; ?>
