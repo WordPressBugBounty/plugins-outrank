@@ -5,7 +5,7 @@ if ( ! defined( 'ABSPATH' ) ) exit; // Exit if accessed directly
  * Plugin Name: Outrank
  * Plugin URI: https://outrank.so
  * Description: Get traffic and outrank competitors with automatic SEO-optimized content generation published to your WordPress site.
- * Version: 1.0.7
+ * Version: 1.0.8
  * Author: Outrank
  * License: GPLv2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -257,10 +257,10 @@ add_action('admin_enqueue_scripts', 'outrank_add_plugin_assets');
 function outrank_add_plugin_assets($hook_suffix = '') {
     if (strpos($hook_suffix, 'outrank') === false) return; // Only enqueue on outrank pages
 
-    wp_enqueue_style('outrank-style', OUTRANK_PLUGIN_URL . 'css/manage.css', [], '1.0.7');
-    wp_enqueue_style('outrank-home-style', OUTRANK_PLUGIN_URL . 'css/home.css', [], '1.0.7');
+    wp_enqueue_style('outrank-style', OUTRANK_PLUGIN_URL . 'css/manage.css', [], '1.0.8');
+    wp_enqueue_style('outrank-home-style', OUTRANK_PLUGIN_URL . 'css/home.css', [], '1.0.8');
 
-    wp_enqueue_script('outrank-script', OUTRANK_PLUGIN_URL . 'script/manage.js', ['jquery'], '1.0.7', true);
+    wp_enqueue_script('outrank-script', OUTRANK_PLUGIN_URL . 'script/manage.js', ['jquery'], '1.0.8', true);
 }
 
 // Helper function to get all articles from DB
@@ -338,4 +338,3 @@ function outrank_sync_post_delete($post_id) {
 
     outrank_clear_articles_cache();
 }
-
