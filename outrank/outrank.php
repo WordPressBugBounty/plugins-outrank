@@ -5,7 +5,7 @@ if ( ! defined( 'ABSPATH' ) ) exit; // Exit if accessed directly
  * Plugin Name: Outrank
  * Plugin URI: https://outrank.so
  * Description: Get traffic and outrank competitors with automatic SEO-optimized content generation published to your WordPress site.
- * Version: 1.0.8
+ * Version: 1.0.9
  * Author: Outrank
  * License: GPLv2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html

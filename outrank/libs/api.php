@@ -140,13 +140,6 @@ function outrank_receive_article($request) {
 
     $category_ids = outrank_resolve_category_ids($params['category'] ?? '');
 
-    $unique_slug = outrank_generate_unique_slug($slug, $table_name);
-    if (!$unique_slug) {
-        return new WP_REST_Response([
-            'error' => 'Too many posts with the same slug. Please use a different slug.'
-        ], 409);
-    }
-
     $sanitized_content = outrank_sanitize_content($params['content'] ?? '');
 
     $post_id = outrank_create_post_with_images([
@@ -154,7 +147,7 @@ function outrank_receive_article($request) {
         'post_content'  => $sanitized_content,
         'post_status'   => get_option('outrank_post_as_draft', 'yes') === 'yes' ? 'draft' : 'publish',
         'post_type'     => 'post',
-        'post_name'     => $unique_slug,
+        'post_name'     => $slug,
         'post_category' => $category_ids,
         'tags_input'    => isset($params['tags']) ? array_map('sanitize_text_field', $params['tags']) : [],
         'post_author'   => $author_id,
@@ -759,23 +752,6 @@ function outrank_resolve_category_ids($category) {
         $category_ids[] = 1;
     }
     return $category_ids;
-}
-
-function outrank_generate_unique_slug($slug, $table_name) {
-    global $wpdb;
-    $max_attempts = 10;
-    for ($i = 0; $i < $max_attempts; $i++) {
-        $test_slug = ($i === 0) ? $slug : $slug . '-' . ($i + 1);
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-        $in_custom = $wpdb->get_var(
-            $wpdb->prepare("SELECT COUNT(*) FROM %i WHERE slug = %s", $table_name, $test_slug)
-        );
-        $in_wp = get_page_by_path($test_slug, OBJECT, 'post');
-        if ($in_custom == 0 && !$in_wp) {
-            return $test_slug;
-        }
-    }
-    return false;
 }
 
 function outrank_set_seo_meta($post_id, $title = null, $meta_description = null, $focus_keyword = null) {
