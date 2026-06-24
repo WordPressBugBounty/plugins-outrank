@@ -142,12 +142,18 @@ function outrank_receive_article($request) {
 
     $sanitized_content = outrank_sanitize_content($params['content'] ?? '');
 
+    // WordPress only deduplicates slugs for published posts, not drafts, so we
+    // resolve a slug that is unique against both the tracking table and WP posts
+    // before creating the post. This prevents the tracking table's slug_unique
+    // constraint from being violated when posts are created as drafts.
+    $unique_slug = outrank_generate_unique_slug($slug, $table_name);
+
     $post_id = outrank_create_post_with_images([
         'post_title'    => $title,
         'post_content'  => $sanitized_content,
         'post_status'   => get_option('outrank_post_as_draft', 'yes') === 'yes' ? 'draft' : 'publish',
         'post_type'     => 'post',
-        'post_name'     => $slug,
+        'post_name'     => $unique_slug,
         'post_category' => $category_ids,
         'tags_input'    => isset($params['tags']) ? array_map('sanitize_text_field', $params['tags']) : [],
         'post_author'   => $author_id,
@@ -752,6 +758,21 @@ function outrank_resolve_category_ids($category) {
         $category_ids[] = 1;
     }
     return $category_ids;
+}
+
+function outrank_generate_unique_slug($slug, $table_name) {
+    global $wpdb;
+    $i = 0;
+    do {
+        $test_slug = ($i === 0) ? $slug : $slug . '-' . ($i + 1);
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+        $in_custom = $wpdb->get_var(
+            $wpdb->prepare("SELECT COUNT(*) FROM %i WHERE slug = %s", $table_name, $test_slug)
+        );
+        $in_wp = get_page_by_path($test_slug, OBJECT, 'post');
+        $i++;
+    } while ($in_custom != 0 || $in_wp);
+    return $test_slug;
 }
 
 function outrank_set_seo_meta($post_id, $title = null, $meta_description = null, $focus_keyword = null) {

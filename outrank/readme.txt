@@ -4,7 +4,7 @@ Tags: seo, content automation, article sync, ai blog
 Requires at least: 6.4  
 Tested up to: 6.9
 Requires PHP: 8.0  
-Stable tag: 1.0.9
+Stable tag: 1.0.10
 License: GPLv2 or later  
 License URI: https://www.gnu.org/licenses/gpl-2.0.html  
 
@@ -69,6 +69,9 @@ Yes. You can choose whether articles are saved as drafts or published instantly.
 Outrank syncs articles to your site via a secure API connection.
 
 == Changelog ==
+
+= 1.0.10 =
+* Fixed a duplicate slug error that could occur when publishing articles as drafts
 
 = 1.0.9 =
 * Slug generation limit has been removed; WordPress now assigns unique slugs without limit
