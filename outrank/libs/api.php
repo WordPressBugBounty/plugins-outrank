@@ -138,6 +138,8 @@ function outrank_receive_article($request) {
         }
     }
 
+    // Empty when Outrank sends no category; wp_insert_post() then assigns the
+    // site's Default Post Category (Settings > Writing).
     $category_ids = outrank_resolve_category_ids($params['category'] ?? '');
 
     $sanitized_content = outrank_sanitize_content($params['content'] ?? '');
@@ -322,7 +324,12 @@ function outrank_edit_article($request) {
     }
 
     if ($has_category) {
-        $post_update['post_category'] = outrank_resolve_category_ids($params['category']);
+        $category_ids = outrank_resolve_category_ids($params['category']);
+        // An empty list carries no category information: leave the post's
+        // existing categories untouched instead of resetting them.
+        if (!empty($category_ids)) {
+            $post_update['post_category'] = $category_ids;
+        }
     }
 
     if ($has_tags) {
@@ -736,26 +743,38 @@ function outrank_sanitize_content($content) {
     return $sanitized;
 }
 
+/**
+ * Resolve the category name(s) sent by Outrank to category term IDs.
+ *
+ * Returns an empty array when no usable category was supplied so that
+ * WordPress applies its own rules: wp_insert_post() assigns the site's
+ * Default Post Category (Settings > Writing) to a new post, and
+ * wp_update_post() keeps an existing post's categories as they are.
+ *
+ * @param string|string[] $category Category name(s) from the request, or empty.
+ * @return int[] Category term IDs; empty when none could be resolved.
+ */
 function outrank_resolve_category_ids($category) {
     $category_ids = [];
     if (!empty($category)) {
         $categories = is_array($category) ? $category : [$category];
         foreach ($categories as $cat_name) {
             $cat_name = sanitize_text_field($cat_name);
+            if ($cat_name === '') {
+                continue;
+            }
             $cat = get_category_by_slug(sanitize_title($cat_name));
             if (!$cat) {
+                // A category that cannot be created is skipped rather than
+                // replaced with "Uncategorized" (term 1).
                 $term = wp_insert_term($cat_name, 'category');
                 if (!is_wp_error($term)) {
                     $category_ids[] = $term['term_id'];
-                } else {
-                    $category_ids[] = 1;
                 }
             } else {
                 $category_ids[] = $cat->term_id;
             }
         }
-    } else {
-        $category_ids[] = 1;
     }
     return $category_ids;
 }

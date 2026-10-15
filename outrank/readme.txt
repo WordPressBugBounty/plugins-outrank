@@ -2,9 +2,9 @@
 Contributors: eugenezolo  
 Tags: seo, content automation, article sync, ai blog  
 Requires at least: 6.4  
-Tested up to: 6.9
+Tested up to: 7.1
 Requires PHP: 8.0  
-Stable tag: 1.0.10
+Stable tag: 1.0.11
 License: GPLv2 or later  
 License URI: https://www.gnu.org/licenses/gpl-2.0.html  
 
@@ -70,6 +70,11 @@ Outrank syncs articles to your site via a secure API connection.
 
 == Changelog ==
 
+= 1.0.11 =
+* New posts now use the site's Default Post Category (Settings > Writing) when Outrank does not specify a category, instead of always being filed under "Uncategorized"
+* A category that cannot be created is skipped instead of being replaced with "Uncategorized"
+* Editing an article with an empty category no longer resets its existing categories
+
 = 1.0.10 =
 * Fixed a duplicate slug error that could occur when publishing articles as drafts
 
@@ -129,6 +134,9 @@ Outrank syncs articles to your site via a secure API connection.
 * Manual and automatic article syncing via cron.
 
 == Upgrade Notice ==
+
+= 1.0.11 =
+New posts now use your site's Default Post Category (Settings > Writing) when Outrank does not specify a category, instead of always being filed under "Uncategorized".
 
 = 1.0.0 =
 First release — includes cron sync, manual sync, and support for draft/publish modes.
